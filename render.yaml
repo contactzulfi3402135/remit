@@ -1,0 +1,42 @@
+services:
+  # One authoritative ledger process. In production this role belongs to
+  # the customer's ERP/billing API; here it is the seeded stand-in world.
+  - type: web
+    name: remit-ledger
+    runtime: docker
+    plan: free
+    dockerfilePath: ./ledger/Dockerfile
+    dockerContext: ./ledger
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: LEDGER_TOKEN
+        generateValue: true
+      - key: WORLD_SEED
+        value: "20261023"
+
+  # Password-protected human desk. Set LEDGER_URL to the public
+  # remit-ledger URL and copy its LEDGER_TOKEN after the first deploy.
+  - type: web
+    name: remit-review
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile.agent
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: LEDGER_URL
+        sync: false
+      - key: LEDGER_TOKEN
+        sync: false
+      - key: REVIEW_PASSWORD
+        generateValue: true
+      - key: DRAFT_MODEL
+        value: baseline:rules
+      - key: REMIT_BUDGET_USD
+        value: "1"

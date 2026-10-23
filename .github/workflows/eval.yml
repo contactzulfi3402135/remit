@@ -1,0 +1,103 @@
+name: remit-eval
+
+# The exam button. This workflow is deliberately isolated from live data:
+# a throwaway GitHub Postgres service for agent memory and an in-memory
+# ledger for the seeded debtor world. It never calls the live ledger.
+on:
+  workflow_dispatch:
+    inputs:
+      draft_model:
+        description: 'Draft model as provider:model'
+        type: string
+        default: 'baseline:rules'
+      seed:
+        description: 'World/bandit seed'
+        type: string
+        default: '20261023'
+      budget_usd:
+        description: 'Maximum model spend across the eval in USD'
+        type: string
+        default: '5'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: remit-eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: remit
+          POSTGRES_PASSWORD: remit
+          POSTGRES_DB: remit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U remit -d remit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://remit:remit@localhost:5432/remit
+      LEDGER_URL: http://localhost:8090
+      LEDGER_TOKEN: ci-only-token
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OSS_BASE_URL: https://api.groq.com/openai/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ledger/go.mod
+      - run: npm install
+      - name: Start isolated in-memory ledger
+        run: |
+          (cd ledger && go build -o "$RUNNER_TEMP/ledger" .)
+          LEDGER_TOKEN="$LEDGER_TOKEN" PORT=8090 "$RUNNER_TEMP/ledger" > "$RUNNER_TEMP/ledger.log" 2>&1 &
+          for i in $(seq 30); do
+            if curl -fsS localhost:8090/healthz >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/ledger.log"
+          exit 1
+      - name: Evaluate none vs template vs remit
+        run: >-
+          npx tsx src/cli.ts eval
+          --draft-model '${{ inputs.draft_model }}'
+          --seed '${{ inputs.seed }}'
+          --budget '${{ inputs.budget_usd }}'
+      - name: Publish scorecard to the run page
+        if: always()
+        run: |
+          latest=$(ls -t results/eval-*.md 2>/dev/null | head -1)
+          if [ -n "$latest" ]; then cat "$latest" >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Upload full reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: results/
+          if-no-files-found: warn
+      - name: Commit results to the repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/
+          if git diff --cached --quiet; then
+            echo "No new results to commit."
+          else
+            git commit -m "Cloud eval results"
+            git push || echo "::warning::Could not push results; they are saved as the run artifact instead."
+          fi

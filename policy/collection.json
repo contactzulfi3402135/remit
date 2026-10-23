@@ -1,0 +1,16 @@
+{
+  "min_gap_days": 3,
+  "max_contacts_per_invoice": 6,
+  "pre_due_reminder_days": 2,
+  "plan_max_instalments": 3,
+  "plan_max_days": 45,
+  "plan_min_first_pct": 25,
+  "plan_human_above_cents": 500000,
+  "discount_allowed": false,
+  "banned_phrases": [
+    "or else", "legal action", "lawsuit", "court", "jail", "prison",
+    "credit score will be destroyed", "we will ruin", "shame",
+    "final warning", "immediately or", "police", "fraudster", "thief"
+  ],
+  "note": "B2B invoices only. This agent never handles consumer debt, never threatens, never discounts, and never writes off. Disputes, opt-outs, insolvency mentions and over-limit plans go to a human. These limits live in code + this file, never in a prompt."
+}

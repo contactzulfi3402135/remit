@@ -1,0 +1,78 @@
+name: remit-sweep
+
+# The running agent. In this stand-in deployment, one hourly sweep is one
+# simulated business day: work the ledger, then advance its clock once.
+# The deployed ledger is the single writer; this workflow calls it over
+# HTTPS instead of starting a second ledger against the same database.
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      draft_model:
+        description: 'Draft model as provider:model (blank = DRAFT_MODEL secret/variable or auto)'
+        type: string
+        default: ''
+      budget_usd:
+        description: 'Maximum model spend for this sweep in USD'
+        type: string
+        default: '1'
+
+permissions:
+  contents: read
+
+# Two sweeps must never advance/work the same simulated day concurrently.
+concurrency:
+  group: remit-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LEDGER_URL: ${{ secrets.LEDGER_URL }}
+      LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN }}
+      DRAFT_MODEL: ${{ inputs.draft_model }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OSS_BASE_URL: https://api.groq.com/openai/v1
+    steps:
+      - name: Check secrets
+        run: |
+          missing=0
+          for name in DATABASE_URL LEDGER_URL LEDGER_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Add the $name repository secret first. See the deployment guide."
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Wake the ledger
+        run: |
+          for i in $(seq 1 18); do
+            if curl -fsS "$LEDGER_URL/healthz" >/dev/null; then exit 0; fi
+            echo "Ledger not ready yet (free services can take about a minute to wake); retry $i/18"
+            sleep 10
+          done
+          echo "::error::Ledger did not become healthy at $LEDGER_URL/healthz"
+          exit 1
+      - name: Apply schema and seed only if empty
+        run: npm run seed
+      - name: Sweep one simulated business day
+        run: |
+          budget='${{ inputs.budget_usd }}'
+          if [ -z "$budget" ]; then budget=1; fi
+          if [ -n "$DRAFT_MODEL" ]; then
+            npx tsx src/cli.ts sweep --draft-model "$DRAFT_MODEL" --budget "$budget"
+          else
+            npx tsx src/cli.ts sweep --budget "$budget"
+          fi
