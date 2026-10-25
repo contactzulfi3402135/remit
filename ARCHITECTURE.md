@@ -1,13 +1,14 @@
 # Remit architecture
 
-Remit is split into an agent (TypeScript), a human desk (same TypeScript
-process when serving), an agent database (Postgres), and a system of
-record behind GraphQL (a Go stand-in ledger in this repository).
+Remit is split into an agent (TypeScript), a Control Room (same
+TypeScript process when serving), an agent database (Postgres), and a
+system of record behind GraphQL (a Go stand-in ledger in this
+repository).
 
 ```text
                          ┌──────────────────────────────┐
-                         │ Human desk (HTTP + Basic)    │
-                         │ disputes / plan approval     │
+                         │ Control Room (HTTP + Basic)  │
+                         │ clients / queue / settings   │
                          └──────────────┬───────────────┘
                                         │
 ┌────────────────┐      ┌───────────────▼────────────────┐      ┌─────────────────┐
@@ -63,7 +64,31 @@ Agent state is scoped:
 
 Evaluation calls `resetScope` before each disposable episode. That clears
 only that scope’s cursor, decisions, queue, suppressions, playbook stats,
-and contact trials. `resetScope` refuses the `live` scope.
+contact trials, and settings. `resetScope` refuses the `live` scope.
+
+### Operator settings are data, not prompt text
+
+`src/settings.ts` normalizes the Control Room's live settings before
+they are stored as JSON at `settings:<scope>` in `remit.state`, with an
+append-only copy in `remit.settings_history`. `policyFromSettings`
+maps the validated values into the effective `CollectionPolicy` used by
+the engine, queue approval, and manual sends. It always forces
+`discount_allowed: false` and retains the code-owned banned phrases.
+
+The dashboard can tune schedule, cadence, plan bounds, enabled
+playbooks, exploration/reward window, tones/templates, model, and
+budget only inside validated ranges. Templates containing banned or
+discount-like language are rejected at save time and again by the final
+draft gate. Corrupt stored settings fall back to defaults rather than
+taking the sweep down.
+
+`scheduleStatus` evaluates timezone/weekday/time in the sweep wrapper, not
+inside `runDay`, so evaluation remains clock-independent. A paused or
+out-of-window scheduled invocation finishes its run row as a no-op and
+does not advance the simulated world. A forced dashboard/CLI run can
+bypass only the clock test, never Pause. `acquireSweepLock` holds a
+Postgres advisory lock on a dedicated connection so GitHub and the
+Control Room cannot work/advance the same live day concurrently.
 
 ## One engine pass
 
@@ -74,11 +99,14 @@ and contact trials. `resetScope` refuses the `live` scope.
 2. **Safety first.** Classify fresh replies. Dispute/distress suppress and
    queue; opt-out suppresses and queues acknowledgement.
 3. **Attribute payments.** For each fresh payment, find the latest
-   contact trial inside seven days. If that trial is unrewarded, mark it
+   contact trial inside the configured reward window (default seven
+   days). If that trial is unrewarded, mark it
    rewarded and increment the aggregate for its frozen segment/playbook.
    If it is already rewarded, stop—do not credit an older trial.
 4. **Select actionable invoices.** Open, positive remaining balance, not
-   suppressed, and no earlier than two days before due.
+   suppressed, inside the configured pre-due start (default two days
+   before due), and not beyond the configured stale-debt cutoff (default
+   90 days overdue).
 5. **Infer segment.** `segmentOf` uses debtor-level paid history plus the
    invoice’s contact/reply/promise/payment events.
 6. **Choose and draft.** Template strategy uses fixed overdue days and
@@ -107,8 +135,9 @@ stores:
 
 ### Reward
 
-A reward means: “at least one payment arrived within seven days after
-this contact, and this was the latest contact before that payment.” It
+A reward means: “at least one payment arrived within the effective
+reward window after this contact, and this was the latest contact before
+that payment.” It
 does not prove causation.
 
 Required invariants:
@@ -141,9 +170,16 @@ newest structured promise and whether any later payment exists.
 This prevents a reminder sent shortly before a promised payment from
 stealing the earlier contact’s reward.
 
-## Human desk authority
+## Control Room authority
 
-The desk exposes only kind-appropriate actions:
+The Control Room can create invoices, edit client display/contact
+fields, record manual payments/promises, pause/resume ordinary contact,
+escalate/reopen cases, resolve disputes, and send a manual reminder or
+equal-split plan. Manual outbound actions still require an open,
+unsuppressed invoice and pass the same effective policy gate; manual
+contacts create normal immutable trials.
+
+The queue exposes only kind-appropriate actions:
 
 | Queue kind | Allowed actions |
 | --- | --- |
@@ -152,15 +188,19 @@ The desk exposes only kind-appropriate actions:
 | policy with stored `offer_plan` | approve & send plan, resume, keep paused |
 | other queue kinds | resume, keep paused |
 
-Server-side checks mirror button visibility. Posting `resume` for an
-opt-out returns HTTP 400 and leaves the suppression intact.
+Server-side checks mirror button visibility and also look for a separate
+open opt-out item, opt-out suppression reason, or opt-out reply for the
+same invoice. Posting `resume` or a manual send for an opt-out redirects
+with an error and leaves the suppression intact.
 
 Plan approval is a revalidation, not a blind send:
 
 1. parse the stored draft with `checkDraft`;
-2. fetch current invoice, events, and world day;
-3. require the invoice to still be open;
-4. run `gate` with only `plan_human_above_cents` raised;
+2. fetch current invoice, events, settings, suppressions, and world day;
+3. require the invoice to still be open, unsuppressed, not opted out,
+   and using an enabled playbook;
+4. run `gate` against the effective settings policy with only
+   `plan_human_above_cents` raised;
 5. create the plan, log the contact, and record a normal contact trial.
 
 Dispute resolution reopens a disputed ledger invoice and removes the
@@ -182,7 +222,9 @@ Debtor-controlled strings are HTML-escaped before rendering.
   segment, playbook, world day, and reason.
 - `queue` — open human work, with JSON detail such as debtor reply or the
   full blocked draft.
-- `state` — scoped event cursors.
+- `state` — scoped event cursors and current `settings:<scope>` JSON
+  (settings contain no provider secrets).
+- `settings_history` — append-only audited dashboard setting versions.
 - `playbook_stats` — aggregate contacts/rewards by scope, segment, and
   playbook.
 - `contact_trials` — immutable attribution rows described above.
@@ -206,6 +248,7 @@ this store.
 Queries:
 
 - `stats`
+- `debtors`
 - `invoices(status, limit)`
 - `invoice(id)`
 - `debtorInvoices(debtorId)`
@@ -214,6 +257,11 @@ Queries:
 
 Mutations:
 
+- `createInvoice` (dashboard/ERP invoice intake; client selection is by
+  id when supplied, otherwise the first case-insensitive email match,
+  otherwise the first case-insensitive name match)
+- `updateDebtor`
+- `recordPayment` (rejects paid/disputed invoices and overpayment)
 - `logContact`
 - `createPlan`
 - `recordPromise`
@@ -241,6 +289,11 @@ they would not exist on a production ERP adapter.
   learning claim.
 - **Plan terms changed by time/payment:** approval revalidation rejects
   the plan instead of sending stale terms.
+- **Concurrent sweep attempt:** the second caller returns `busy` without
+  creating a completed run or advancing the world; the advisory lock is
+  released with its dedicated connection.
+- **Paused/out-of-window schedule:** not treated as a failure. The run
+  records the skip reason and world time does not advance.
 - **Free-tier sleep:** sweep workflow polls `/healthz` for up to about
   three minutes before failing.
 
@@ -248,8 +301,10 @@ they would not exist on a production ERP adapter.
 
 - Ledger GraphQL requires `Authorization: Bearer <LEDGER_TOKEN>` when a
   token is configured. Production deployment must configure one.
-- Human desk uses HTTP Basic with user `remit`; put it behind HTTPS from
-  the hosting platform. It is an operator tool, not a public product UI.
+- Control Room uses HTTP Basic with user `remit`; put it behind HTTPS
+  from the hosting platform. It is an operator tool, not a public product
+  UI. Form posts with an `Origin` header must be same-origin, bodies are
+  size-limited, and provider keys are not accepted by the settings form.
 - Secrets belong in platform secret stores/GitHub secrets, never in the
   repo or chat.
 - Debtor replies are data, not instructions. Even if a model follows a

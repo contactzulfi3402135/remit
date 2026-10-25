@@ -8,7 +8,7 @@ import { pool } from './db.js';
 const USAGE = `remit - B2B invoice collection agent
 
 Usage:
-  remit sweep [--draft-model provider:model] [--budget 1] [--ledger URL]
+  remit sweep [--draft-model provider:model] [--budget 1] [--force] [--ledger URL]
   remit eval  [--seed 20261023] [--draft-model provider:model] [--budget 5] [--ledger URL]
   remit serve [--port 3000] [--ledger URL]
 
@@ -25,15 +25,34 @@ function num(v: string | undefined, fallback: number, name: string): number {
   if (!Number.isFinite(n)) throw new Error(`--${name} needs a number`);
   return n;
 }
+function optionalNum(v: string | undefined, name: string): number | undefined {
+  if (v === undefined || v.trim() === '') return undefined;
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`--${name} needs a number`);
+  return n;
+}
+function nonEmpty(v: string | undefined): string | undefined {
+  const s = v?.trim();
+  return s ? s : undefined;
+}
 
 const [cmd, ...args] = process.argv.slice(2);
 const ledgerUrl = flag(args, 'ledger') ?? process.env.LEDGER_URL ?? 'http://localhost:8090';
-const draftModel = flag(args, 'draft-model') ?? process.env.DRAFT_MODEL ?? defaultModel('draft');
+const draftModelOverride = nonEmpty(flag(args, 'draft-model')) ?? nonEmpty(process.env.DRAFT_MODEL);
+const draftModel = draftModelOverride ?? defaultModel('draft');
 
 try {
   if (cmd === 'sweep') {
-    const s = await sweep({ ledgerUrl, draftModel, budgetUsd: num(flag(args, 'budget') ?? process.env.REMIT_BUDGET_USD, 1, 'budget') });
-    console.log(`sweep done: day=${s.day} considered=${s.considered} contacted=${s.contacted} plans=${s.plansOffered} escalated=${s.escalated} queued=${s.queued} waited=${s.waited} cost=$${s.costUsd.toFixed(4)}`);
+    const s = await sweep({
+      ledgerUrl,
+      draftModelOverride,
+      budgetOverrideUsd: optionalNum(flag(args, 'budget') ?? process.env.REMIT_BUDGET_USD, 'budget'),
+      forceSchedule: args.includes('--force'),
+      source: 'cli',
+    });
+    if (s.busy) console.log('sweep skipped: another sweep is already running');
+    else if (s.skipped) console.log(`sweep skipped: ${s.skipped} (world day ${s.worldDayAfter ?? s.day}; model ${s.draftModel}; budget $${s.budgetUsd})`);
+    else console.log(`sweep done: day=${s.day} considered=${s.considered} contacted=${s.contacted} plans=${s.plansOffered} escalated=${s.escalated} queued=${s.queued} waited=${s.waited} cost=$${s.costUsd.toFixed(4)} model=${s.draftModel}`);
     await pool.end();
   } else if (cmd === 'eval') {
     await evaluate({

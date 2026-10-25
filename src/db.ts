@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { asset } from './assets.js';
 import pg from 'pg';
 import type { ContactTrial, Playbook, PlaybookStat, Segment } from './strategy.js';
@@ -8,7 +8,10 @@ export const pool = new pg.Pool({
 });
 
 export async function migrate(): Promise<void> {
-  await pool.query(readFileSync(asset('db/migrations/001_init.sql'), 'utf8'));
+  const dir = asset('db/migrations');
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    await pool.query(readFileSync(`${dir}/${file}`, 'utf8'));
+  }
 }
 
 let currentRun: number | null = null;
@@ -73,6 +76,45 @@ export async function getState(key: string): Promise<string | null> {
 }
 export async function setState(key: string, value: string): Promise<void> {
   await pool.query('insert into remit.state (key, value) values ($1,$2) on conflict (key) do update set value = excluded.value', [key, value]);
+}
+
+export async function recordSettingsHistory(scope: string, settings: unknown, changedBy: string): Promise<void> {
+  await pool.query(
+    'insert into remit.settings_history (scope, settings, changed_by) values ($1,$2,$3)',
+    [scope, JSON.stringify(settings), changedBy],
+  );
+}
+export async function settingsHistory(scope = 'live', limit = 10): Promise<Array<Record<string, unknown>>> {
+  const r = await pool.query(
+    'select id, settings, changed_by, changed_at from remit.settings_history where scope = $1 order by id desc limit $2',
+    [scope, limit]);
+  return r.rows;
+}
+
+// One live sweep at a time across GitHub Actions and the dashboard.
+// The lock is held on one dedicated connection for the whole sweep.
+export async function acquireSweepLock(): Promise<null | (() => Promise<void>)> {
+  const client = await pool.connect();
+  try {
+    const r = await client.query("select pg_try_advisory_lock(hashtext('remit-live-sweep')) as locked");
+    if (!r.rows[0]?.locked) {
+      client.release();
+      return null;
+    }
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      try {
+        await client.query("select pg_advisory_unlock(hashtext('remit-live-sweep'))");
+      } finally {
+        client.release();
+      }
+    };
+  } catch (err) {
+    client.release();
+    throw err;
+  }
 }
 
 export async function playbookStats(scope: string, segment: string): Promise<PlaybookStat[]> {
@@ -149,6 +191,8 @@ export async function resetScope(scope: string): Promise<void> {
     await client.query('delete from remit.queue where scope = $1', [scope]);
     await client.query('delete from remit.suppressions where scope = $1', [scope]);
     await client.query('delete from remit.state where key = $1', [`${scope}:last_event_id`]);
+    await client.query('delete from remit.state where key = $1', [`settings:${scope}`]);
+    await client.query('delete from remit.settings_history where scope = $1', [scope]);
     await client.query('commit');
   } catch (err) {
     await client.query('rollback');
@@ -168,6 +212,10 @@ export async function suppressed(scope: string): Promise<Set<string>> {
 export async function unsuppress(scope: string, invoiceId: string): Promise<void> {
   await pool.query('delete from remit.suppressions where scope = $1 and invoice_id = $2', [scope, invoiceId]);
 }
+export async function suppressionDetails(scope: string): Promise<Map<string, string>> {
+  const r = await pool.query('select invoice_id, reason from remit.suppressions where scope = $1', [scope]);
+  return new Map(r.rows.map((x) => [String(x.invoice_id), String(x.reason)]));
+}
 
 export async function recentRuns(limit = 20): Promise<Array<Record<string, unknown>>> {
   const r = await pool.query('select id, kind, draft_model, scope, started_at, finished_at, stats from remit.runs order by id desc limit $1', [limit]);
@@ -176,5 +224,12 @@ export async function recentRuns(limit = 20): Promise<Array<Record<string, unkno
 export async function recentDecisions(limit = 60): Promise<Array<Record<string, unknown>>> {
   const r = await pool.query(
     'select id, invoice_id, world_day, segment, playbook, action, outcome, why, at from remit.decisions order by id desc limit $1', [limit]);
+  return r.rows;
+}
+export async function invoiceDecisions(scope: string, invoiceId: string, limit = 30): Promise<Array<Record<string, unknown>>> {
+  const r = await pool.query(
+    `select id, invoice_id, world_day, segment, playbook, action, outcome, why, at
+       from remit.decisions where scope = $1 and invoice_id = $2 order by id desc limit $3`,
+    [scope, invoiceId, limit]);
   return r.rows;
 }

@@ -26,6 +26,15 @@ var invoiceType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
+var debtorType = graphql.NewObject(graphql.ObjectConfig{
+	Name: "Debtor",
+	Fields: graphql.Fields{
+		"id":    &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(Debtor).ID, nil }},
+		"name":  &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(Debtor).Name, nil }},
+		"email": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(Debtor).Email, nil }},
+	},
+})
+
 var eventType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "LedgerEvent",
 	Fields: graphql.Fields{
@@ -48,11 +57,15 @@ type statsView struct {
 var statsType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "LedgerStats",
 	Fields: graphql.Fields{
-		"worldDay":       &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).WorldDay, nil }},
-		"invoicedCents":  &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return int(p.Source.(statsView).InvoicedCents), nil }},
-		"collectedCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return int(p.Source.(statsView).CollectedCents), nil }},
-		"openCount":      &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).OpenCount, nil }},
-		"paidCount":      &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).PaidCount, nil }},
+		"worldDay": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).WorldDay, nil }},
+		"invoicedCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			return int(p.Source.(statsView).InvoicedCents), nil
+		}},
+		"collectedCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			return int(p.Source.(statsView).CollectedCents), nil
+		}},
+		"openCount": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).OpenCount, nil }},
+		"paidCount": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(statsView).PaidCount, nil }},
 	},
 })
 
@@ -71,14 +84,22 @@ func buildSchema(svc *Service) (graphql.Schema, error) {
 	invoiceWithName := graphql.NewObject(graphql.ObjectConfig{
 		Name: "InvoiceWithName",
 		Fields: graphql.Fields{
-			"id":          &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.ID, nil }},
-			"debtorId":    &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.DebtorID, nil }},
-			"debtorName":  &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Name, nil }},
-			"amountCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return int(p.Source.(namedInvoice).Invoice.AmountCents), nil }},
-			"paidCents":   &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return int(p.Source.(namedInvoice).Invoice.PaidCents), nil }},
-			"issuedDay":   &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.IssuedDay, nil }},
-			"dueDay":      &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.DueDay, nil }},
-			"status":      &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.Status, nil }},
+			"id": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.ID, nil }},
+			"debtorId": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				return p.Source.(namedInvoice).Invoice.DebtorID, nil
+			}},
+			"debtorName": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Name, nil }},
+			"amountCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				return int(p.Source.(namedInvoice).Invoice.AmountCents), nil
+			}},
+			"paidCents": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				return int(p.Source.(namedInvoice).Invoice.PaidCents), nil
+			}},
+			"issuedDay": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				return p.Source.(namedInvoice).Invoice.IssuedDay, nil
+			}},
+			"dueDay": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.DueDay, nil }},
+			"status": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) { return p.Source.(namedInvoice).Invoice.Status, nil }},
 			"paidDay": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 				if p.Source.(namedInvoice).Invoice.PaidDay == nil {
 					return nil, nil
@@ -120,6 +141,14 @@ func buildSchema(svc *Service) (graphql.Schema, error) {
 							}
 						}
 					})
+					return out, err
+				},
+			},
+			"debtors": &graphql.Field{
+				Type: graphql.NewList(debtorType),
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					var out []Debtor
+					err := svc.view(func(st *State) { out = append(out, st.Debtors...) })
 					return out, err
 				},
 			},
@@ -247,6 +276,45 @@ func buildSchema(svc *Service) (graphql.Schema, error) {
 	mutation := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Mutation",
 		Fields: graphql.Fields{
+			"createInvoice": &graphql.Field{
+				Type: graphql.String,
+				Args: graphql.FieldConfigArgument{
+					"debtorId":    &graphql.ArgumentConfig{Type: graphql.String},
+					"debtorName":  &graphql.ArgumentConfig{Type: graphql.String},
+					"debtorEmail": &graphql.ArgumentConfig{Type: graphql.String},
+					"amountCents": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.Int)},
+					"dueDay":      &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.Int)},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					debtorID, _ := p.Args["debtorId"].(string)
+					debtorName, _ := p.Args["debtorName"].(string)
+					debtorEmail, _ := p.Args["debtorEmail"].(string)
+					return svc.CreateInvoice(debtorID, debtorName, debtorEmail, int64(p.Args["amountCents"].(int)), p.Args["dueDay"].(int))
+				},
+			},
+			"updateDebtor": &graphql.Field{
+				Type: graphql.Boolean,
+				Args: graphql.FieldConfigArgument{
+					"debtorId": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
+					"name":     &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
+					"email":    &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
+				},
+				Resolve: boolField(func(p graphql.ResolveParams) error {
+					return svc.UpdateDebtor(p.Args["debtorId"].(string), p.Args["name"].(string), p.Args["email"].(string))
+				}),
+			},
+			"recordPayment": &graphql.Field{
+				Type: graphql.Boolean,
+				Args: graphql.FieldConfigArgument{
+					"invoiceId":   &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.String)},
+					"amountCents": &graphql.ArgumentConfig{Type: graphql.NewNonNull(graphql.Int)},
+					"note":        &graphql.ArgumentConfig{Type: graphql.String},
+				},
+				Resolve: boolField(func(p graphql.ResolveParams) error {
+					note, _ := p.Args["note"].(string)
+					return svc.RecordPayment(p.Args["invoiceId"].(string), int64(p.Args["amountCents"].(int)), note)
+				}),
+			},
 			"logContact": &graphql.Field{
 				Type: graphql.Boolean,
 				Args: graphql.FieldConfigArgument{

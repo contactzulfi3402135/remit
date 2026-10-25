@@ -93,3 +93,74 @@ func TestWorldCollectsSomethingOver60Days(t *testing.T) {
 		}
 	})
 }
+
+func TestDashboardInvoiceDebtorAndManualPayments(t *testing.T) {
+	svc := &Service{store: NewMemoryStore(42)}
+	var beforeInvoices, beforeDebtors int
+	_ = svc.view(func(st *State) {
+		beforeInvoices = len(st.Invoices)
+		beforeDebtors = len(st.Debtors)
+	})
+
+	createdID, err := svc.CreateInvoice("", "Dashboard Test Ltd", "Ap@Dashboard.example", 125050, 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdID == "" {
+		t.Fatal("expected a created invoice ID")
+	}
+
+	var debtorID string
+	_ = svc.view(func(st *State) {
+		if len(st.Invoices) != beforeInvoices+1 {
+			t.Fatalf("invoice count = %d, want %d", len(st.Invoices), beforeInvoices+1)
+		}
+		if len(st.Debtors) != beforeDebtors+1 {
+			t.Fatalf("debtor count = %d, want %d", len(st.Debtors), beforeDebtors+1)
+		}
+		inv := findInvoice(st, createdID)
+		if inv == nil || inv.AmountCents != 125050 || inv.DueDay != 14 || inv.Status != "open" {
+			t.Fatalf("unexpected created invoice: %+v", inv)
+		}
+		debtorID = inv.DebtorID
+	})
+
+	secondID, err := svc.CreateInvoice("", "Dashboard Test Ltd", "ap@dashboard.example", 1000, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.view(func(st *State) {
+		if len(st.Debtors) != beforeDebtors+1 {
+			t.Fatalf("same client email created a duplicate debtor: %d", len(st.Debtors))
+		}
+		if inv := findInvoice(st, secondID); inv == nil || inv.DebtorID != debtorID {
+			t.Fatalf("second invoice is on the wrong debtor: %+v", inv)
+		}
+	})
+
+	if err := svc.UpdateDebtor(debtorID, "Renamed Dashboard Ltd", "billing@dashboard.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecordPayment(createdID, 25050, "part payment"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecordPayment(createdID, 100001, "too much"); err == nil {
+		t.Fatal("expected overpayment to be rejected")
+	}
+	if err := svc.RecordPayment(createdID, 100000, "final payment"); err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.view(func(st *State) {
+		debtor := findDebtor(st, debtorID)
+		if debtor == nil || debtor.Name != "Renamed Dashboard Ltd" || debtor.Email != "billing@dashboard.example" {
+			t.Fatalf("debtor edit did not stick: %+v", debtor)
+		}
+		inv := findInvoice(st, createdID)
+		if inv == nil || inv.Status != "paid" || inv.PaidCents != inv.AmountCents {
+			t.Fatalf("manual payments did not settle invoice: %+v", inv)
+		}
+	})
+	if _, err := svc.CreateInvoice("", "No Money Ltd", "", 0, 1); err == nil {
+		t.Fatal("expected non-positive invoice amount to be rejected")
+	}
+}

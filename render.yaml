@@ -16,7 +16,7 @@ services:
       - key: WORLD_SEED
         value: "20261023"
 
-  # Password-protected human desk. Set LEDGER_URL to the public
+  # Password-protected Control Room. Set LEDGER_URL to the public
   # remit-ledger URL and copy its LEDGER_TOKEN after the first deploy.
   - type: web
     name: remit-review
@@ -36,7 +36,21 @@ services:
         sync: false
       - key: REVIEW_PASSWORD
         generateValue: true
+      # The Control Room database settings are the source of truth for the
+      # model and per-sweep budget. Keep these one-run CLI overrides blank.
       - key: DRAFT_MODEL
-        value: baseline:rules
+        value: ""
       - key: REMIT_BUDGET_USD
-        value: "1"
+        value: ""
+      # Optional provider keys for the dashboard's "Run one day now". The
+      # scheduled GitHub sweep needs the same provider key as a GitHub secret.
+      - key: XAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OSS_BASE_URL
+        value: https://api.groq.com/openai/v1

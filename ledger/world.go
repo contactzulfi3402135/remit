@@ -6,6 +6,8 @@ import (
 	"hash/fnv"
 	"math/rand"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -75,12 +77,12 @@ type personaParams struct {
 }
 
 var personas = map[string]personaParams{
-	"forgetful": {payOnContact: 0.50, dailyPay: 0.030, replyProb: 0.55, planAccept: 0.35, planPay: 0.65, promiseKeep: 0.60},
-	"reliable":  {payOnContact: 0.35, dailyPay: 0.180, replyProb: 0.65, planAccept: 0.45, planPay: 0.90, promiseKeep: 0.90},
+	"forgetful":  {payOnContact: 0.50, dailyPay: 0.030, replyProb: 0.55, planAccept: 0.35, planPay: 0.65, promiseKeep: 0.60},
+	"reliable":   {payOnContact: 0.35, dailyPay: 0.180, replyProb: 0.65, planAccept: 0.45, planPay: 0.90, promiseKeep: 0.90},
 	"cash_tight": {payOnContact: 0.06, dailyPay: 0.015, replyProb: 0.55, planAccept: 0.80, planPay: 0.80, promiseKeep: 0.55},
-	"chronic":   {payOnContact: 0.14, dailyPay: 0.025, replyProb: 0.35, planAccept: 0.55, planPay: 0.55, promiseKeep: 0.35},
-	"disputing": {payOnContact: 0.00, dailyPay: 0.000, replyProb: 0.90, planAccept: 0.00, planPay: 0.00, promiseKeep: 0.00},
-	"ghost":     {payOnContact: 0.02, dailyPay: 0.004, replyProb: 0.05, planAccept: 0.05, planPay: 0.10, promiseKeep: 0.10},
+	"chronic":    {payOnContact: 0.14, dailyPay: 0.025, replyProb: 0.35, planAccept: 0.55, planPay: 0.55, promiseKeep: 0.35},
+	"disputing":  {payOnContact: 0.00, dailyPay: 0.000, replyProb: 0.90, planAccept: 0.00, planPay: 0.00, promiseKeep: 0.00},
+	"ghost":      {payOnContact: 0.02, dailyPay: 0.004, replyProb: 0.05, planAccept: 0.05, planPay: 0.10, promiseKeep: 0.10},
 }
 
 var companyNames = []string{
@@ -359,6 +361,154 @@ func (s *Service) ResolveDispute(invoiceID string) error {
 			inv.Status = "open"
 		}
 		st.addEvent(invoiceID, "note", "Dispute investigated and resolved by a human; invoice confirmed correct.")
+		return nil
+	})
+}
+
+func numericSuffix(id, prefix string) int {
+	if !strings.HasPrefix(id, prefix) {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimPrefix(id, prefix))
+	return n
+}
+
+func nextID(ids []string, prefix string) string {
+	max := 0
+	for _, id := range ids {
+		if n := numericSuffix(id, prefix); n > max {
+			max = n
+		}
+	}
+	return fmt.Sprintf("%s%03d", prefix, max+1)
+}
+
+// CreateInvoice is the dashboard/ERP write path for a new client invoice.
+// A manually created simulated debtor receives a hidden ordinary
+// behaviour profile; the dashboard and agent still cannot see personas.
+func (s *Service) CreateInvoice(debtorID, debtorName, debtorEmail string, amountCents int64, dueDay int) (string, error) {
+	createdID := ""
+	err := s.withState(func(st *State) error {
+		if amountCents <= 0 {
+			return fmt.Errorf("amountCents must be positive")
+		}
+		debtorName = strings.TrimSpace(debtorName)
+		debtorEmail = strings.TrimSpace(debtorEmail)
+		var debtor *Debtor
+		if strings.TrimSpace(debtorID) != "" {
+			debtor = findDebtor(st, strings.TrimSpace(debtorID))
+			if debtor == nil {
+				return fmt.Errorf("unknown debtor %s", debtorID)
+			}
+		} else {
+			if debtorEmail != "" {
+				for i := range st.Debtors {
+					if strings.EqualFold(st.Debtors[i].Email, debtorEmail) {
+						debtor = &st.Debtors[i]
+						break
+					}
+				}
+			}
+			if debtor == nil && debtorName != "" {
+				for i := range st.Debtors {
+					if strings.EqualFold(st.Debtors[i].Name, debtorName) {
+						debtor = &st.Debtors[i]
+						break
+					}
+				}
+			}
+			if debtor == nil {
+				if debtorName == "" {
+					return fmt.Errorf("debtorName is required for a new debtor")
+				}
+				debtorIDs := make([]string, 0, len(st.Debtors))
+				for _, d := range st.Debtors {
+					debtorIDs = append(debtorIDs, d.ID)
+				}
+				newID := nextID(debtorIDs, "d")
+				if debtorEmail == "" {
+					debtorEmail = fmt.Sprintf("ap@debtor-%d.example", numericSuffix(newID, "d"))
+				}
+				personaCycle := []string{"forgetful", "reliable", "cash_tight", "chronic"}
+				st.Debtors = append(st.Debtors, Debtor{
+					ID:      newID,
+					Name:    debtorName,
+					Email:   debtorEmail,
+					Persona: personaCycle[len(st.Debtors)%len(personaCycle)],
+				})
+				debtor = &st.Debtors[len(st.Debtors)-1]
+			}
+		}
+
+		invoiceIDs := make([]string, 0, len(st.Invoices))
+		for _, inv := range st.Invoices {
+			invoiceIDs = append(invoiceIDs, inv.ID)
+		}
+		createdID = nextID(invoiceIDs, "inv-")
+		st.Invoices = append(st.Invoices, Invoice{
+			ID:          createdID,
+			DebtorID:    debtor.ID,
+			AmountCents: amountCents,
+			IssuedDay:   dueDay - 30,
+			DueDay:      dueDay,
+			Status:      "open",
+		})
+		sort.Slice(st.Invoices, func(a, b int) bool {
+			na, nb := numericSuffix(st.Invoices[a].ID, "inv-"), numericSuffix(st.Invoices[b].ID, "inv-")
+			if na != nb {
+				return na < nb
+			}
+			return st.Invoices[a].ID < st.Invoices[b].ID
+		})
+		st.addEvent(createdID, "note", "Invoice created from the dashboard.")
+		return nil
+	})
+	return createdID, err
+}
+
+func (s *Service) UpdateDebtor(debtorID, name, email string) error {
+	return s.withState(func(st *State) error {
+		debtor := findDebtor(st, debtorID)
+		if debtor == nil {
+			return fmt.Errorf("unknown debtor %s", debtorID)
+		}
+		name = strings.TrimSpace(name)
+		email = strings.TrimSpace(email)
+		if name == "" {
+			return fmt.Errorf("name is required")
+		}
+		if email == "" || !strings.Contains(email, "@") {
+			return fmt.Errorf("a valid-looking email is required")
+		}
+		debtor.Name = name
+		debtor.Email = email
+		return nil
+	})
+}
+
+// RecordPayment records money received outside the simulated debtor
+// reactions (for example, a bank transfer entered by an operator).
+func (s *Service) RecordPayment(invoiceID string, amountCents int64, note string) error {
+	return s.withState(func(st *State) error {
+		inv := findInvoice(st, invoiceID)
+		if inv == nil {
+			return fmt.Errorf("unknown invoice %s", invoiceID)
+		}
+		if inv.Status == "paid" {
+			return fmt.Errorf("invoice %s is already paid", invoiceID)
+		}
+		if inv.Status == "disputed" {
+			return fmt.Errorf("resolve the dispute before recording a payment")
+		}
+		remaining := inv.AmountCents - inv.PaidCents
+		if amountCents <= 0 || amountCents > remaining {
+			return fmt.Errorf("payment must be between 1 and the remaining %d cents", remaining)
+		}
+		note = strings.TrimSpace(note)
+		if note == "" {
+			note = "Manual payment recorded from the dashboard"
+		}
+		st.pay(inv, amountCents, note)
 		return nil
 	})
 }

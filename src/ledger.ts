@@ -24,6 +24,7 @@ export type LedgerEvent = {
   detail: string;
 };
 
+export type Debtor = { id: string; name: string; email: string };
 export type LedgerStats = { worldDay: number; invoicedCents: number; collectedCents: number; openCount: number; paidCount: number };
 
 const INVOICE_FIELDS = 'id debtorId debtorName amountCents paidCents issuedDay dueDay status paidDay';
@@ -47,6 +48,11 @@ export class Ledger {
   async stats(): Promise<LedgerStats> {
     const d = await this.gql<{ stats: LedgerStats }>(`query { stats { worldDay invoicedCents collectedCents openCount paidCount } }`);
     return d.stats;
+  }
+
+  async debtors(): Promise<Debtor[]> {
+    const d = await this.gql<{ debtors: Debtor[] }>(`query { debtors { id name email } }`);
+    return d.debtors;
   }
 
   async openInvoices(limit = 200): Promise<Invoice[]> {
@@ -80,10 +86,47 @@ export class Ledger {
     return d.events;
   }
 
+  async allEvents(maxEvents = 10_000): Promise<LedgerEvent[]> {
+    const out: LedgerEvent[] = [];
+    let afterId = 0;
+    while (out.length < maxEvents) {
+      const batch = await this.eventsAfter(afterId, 500);
+      if (!batch.length) break;
+      out.push(...batch);
+      afterId = batch[batch.length - 1].id;
+      if (batch.length < 500) break;
+    }
+    return out.slice(0, maxEvents);
+  }
+
   async invoiceEvents(invoiceId: string): Promise<LedgerEvent[]> {
     const d = await this.gql<{ invoiceEvents: LedgerEvent[] }>(
       `query($invoiceId: String!) { invoiceEvents(invoiceId: $invoiceId) { id invoiceId day kind detail } }`, { invoiceId });
     return d.invoiceEvents;
+  }
+
+  async createInvoice(input: { debtorId?: string; debtorName?: string; debtorEmail?: string; amountCents: number; dueDay: number }): Promise<string> {
+    const d = await this.gql<{ createInvoice: string }>(
+      `mutation($debtorId: String, $debtorName: String, $debtorEmail: String, $amountCents: Int!, $dueDay: Int!) {
+         createInvoice(debtorId: $debtorId, debtorName: $debtorName, debtorEmail: $debtorEmail, amountCents: $amountCents, dueDay: $dueDay) }`,
+      input);
+    return d.createInvoice;
+  }
+
+  async updateDebtor(debtorId: string, name: string, email: string): Promise<boolean> {
+    const d = await this.gql<{ updateDebtor: boolean }>(
+      `mutation($debtorId: String!, $name: String!, $email: String!) {
+         updateDebtor(debtorId: $debtorId, name: $name, email: $email) }`,
+      { debtorId, name, email });
+    return d.updateDebtor;
+  }
+
+  async recordPayment(invoiceId: string, amountCents: number, note = ''): Promise<boolean> {
+    const d = await this.gql<{ recordPayment: boolean }>(
+      `mutation($invoiceId: String!, $amountCents: Int!, $note: String) {
+         recordPayment(invoiceId: $invoiceId, amountCents: $amountCents, note: $note) }`,
+      { invoiceId, amountCents, note });
+    return d.recordPayment;
   }
 
   async logContact(invoiceId: string, playbook: string, tone: string, message: string): Promise<boolean> {

@@ -45,14 +45,20 @@ function rnd(): number {
 }
 
 // Epsilon-greedy with an optimism bonus for untried playbooks.
-export function choosePlaybook(stats: PlaybookStat[], epsilon = 0.15): Playbook {
+export function choosePlaybook(
+  stats: PlaybookStat[],
+  epsilon = 0.15,
+  enabledPlaybooks: readonly Playbook[] = PLAYBOOKS,
+): Playbook {
+  const enabled = PLAYBOOKS.filter((p) => enabledPlaybooks.includes(p));
+  const pool = enabled.length ? enabled : [...PLAYBOOKS];
   const byName = new Map(stats.map((s) => [s.playbook, s]));
-  const untried = PLAYBOOKS.filter((p) => !(byName.get(p)?.contacts));
+  const untried = pool.filter((p) => !(byName.get(p)?.contacts));
   if (untried.length) return untried[0];
-  if (rnd() < epsilon) return PLAYBOOKS[Math.floor(rnd() * PLAYBOOKS.length)];
-  let best: Playbook = PLAYBOOKS[0];
+  if (rnd() < epsilon) return pool[Math.floor(rnd() * pool.length)];
+  let best: Playbook = pool[0];
   let bestRate = -1;
-  for (const p of PLAYBOOKS) {
+  for (const p of pool) {
     const s = byName.get(p);
     const rate = s && s.contacts ? s.rewards / s.contacts : 0;
     if (rate > bestRate) { bestRate = rate; best = p; }

@@ -4,6 +4,7 @@ import { gate, replySignal } from './policy.js';
 import { draftStep, baselineDraft } from './draft.js';
 import { checkDraft } from './policy.js';
 import { attributionTarget, choosePlaybook, segmentOf, type Playbook, type Segment } from './strategy.js';
+import { loadSettings, policyFromSettings, type AgentSettings } from './settings.js';
 
 // One business day of collection work. Order matters:
 //  1) read new ledger events (replies/payments) — disputes, opt-outs and
@@ -24,6 +25,7 @@ export type EngineOptions = {
   strategy: 'remit' | 'template';
   budgetUsd: number;
   spentUsd: () => number;
+  settings?: AgentSettings;
 };
 
 const TEMPLATE_DAYS = new Set([1, 7, 14, 21, 28, 35, 42, 49, 56]);
@@ -58,6 +60,8 @@ export async function runDay(o: EngineOptions): Promise<DayStats> {
   const worldDay = ledgerStats.worldDay;
   stats.day = worldDay;
   const scope = o.scope;
+  const settings = o.settings ?? await loadSettings(scope);
+  const effectivePolicy = policyFromSettings(settings);
 
   // 1) New events since our cursor.
   const cursorKey = `${scope}:last_event_id`;
@@ -89,7 +93,7 @@ export async function runDay(o: EngineOptions): Promise<DayStats> {
       // instalment payment cannot reward the same contact—or an older
       // contact—again.
       const trials = await db.contactTrials(scope, e.invoiceId);
-      const target = attributionTarget(trials, e);
+      const target = attributionTarget(trials, e, settings.rewardWindowDays);
       if (target && target.rewardedPaymentEventId === null) {
         const credited = await db.markContactTrialRewarded(scope, target.contactEventId, e.id);
         if (credited) {
@@ -105,7 +109,8 @@ export async function runDay(o: EngineOptions): Promise<DayStats> {
   const open = allInvoices.filter((i) => i.status === 'open' && remainingCents(i) > 0);
   for (const inv of open) {
     const overdue = daysOverdue(inv, worldDay);
-    if (overdue < -2) continue; // not yet within the friendly pre-due window
+    if (overdue < -settings.preDueReminderDays) continue; // before the operator's reminder window
+    if (overdue > settings.maxOverdueDays) continue; // stale debt stays visible for a person; no endless automation
     if (suppressedNow.has(inv.id)) continue;
     stats.considered++;
     if (o.spentUsd() + stats.costUsd > o.budgetUsd) { stats.waited++; continue; }
@@ -121,17 +126,17 @@ export async function runDay(o: EngineOptions): Promise<DayStats> {
       // Fixed dunning calendar: the industry-default comparator.
       if (!TEMPLATE_DAYS.has(overdue)) { stats.waited++; continue; }
       playbook = 'formal-firm';
-      draft = checkDraft(baselineDraft({ inv, events, worldDay, segment, playbook }));
+      draft = checkDraft(baselineDraft({ inv, events, worldDay, segment, playbook, policy: effectivePolicy, settings }));
     } else {
       const statsForSegment = await db.playbookStats(scope, segment);
-      playbook = choosePlaybook(statsForSegment);
-      const out = await draftStep({ inv, events, worldDay, segment, playbook }, o.draftModel);
+      playbook = choosePlaybook(statsForSegment, settings.explorationPct / 100, settings.enabledPlaybooks);
+      const out = await draftStep({ inv, events, worldDay, segment, playbook, policy: effectivePolicy, settings }, o.draftModel);
       draft = out.draft;
       cost = out.costUsd;
     }
     stats.costUsd += cost;
 
-    const verdict = gate(draft, inv, events, worldDay);
+    const verdict = gate(draft, inv, events, worldDay, effectivePolicy);
     if (!verdict.ok) {
       if (verdict.outcome === 'queued') {
         await db.enqueue(scope, inv.id, 'policy', verdict.reason, { draft, segment, playbook });

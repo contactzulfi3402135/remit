@@ -43,8 +43,9 @@ services:
       LEDGER_URL: http://ledger:8090
       LEDGER_TOKEN: ${LEDGER_TOKEN:-change-me}
       REVIEW_PASSWORD: ${REVIEW_PASSWORD:-change-me}
-      DRAFT_MODEL: ${DRAFT_MODEL:-baseline:rules}
-      REMIT_BUDGET_USD: ${REMIT_BUDGET_USD:-1}
+      # Blank by default: Control Room settings are the live source of truth.
+      DRAFT_MODEL: ${DRAFT_MODEL:-}
+      REMIT_BUDGET_USD: ${REMIT_BUDGET_USD:-}
       XAI_API_KEY: ${XAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

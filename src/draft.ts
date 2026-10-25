@@ -1,7 +1,8 @@
 import { chat, isBaseline, type Message, type ToolDef } from './models.js';
-import { checkDraft, POLICY, type Draft } from './policy.js';
+import { checkDraft, POLICY, type CollectionPolicy, type Draft } from './policy.js';
 import { daysOverdue, remainingCents, type Invoice, type LedgerEvent } from './ledger.js';
 import { PLAYBOOK_TONE, type Playbook, type Segment } from './strategy.js';
+import { DEFAULT_TEMPLATES, renderTemplate, type AgentSettings } from './settings.js';
 import * as db from './db.js';
 
 // Drafting: the model writes the debtor-facing words and proposes an
@@ -42,52 +43,78 @@ export type DraftContext = {
   worldDay: number;
   segment: Segment;
   playbook: Playbook;
+  policy?: CollectionPolicy;
+  settings?: AgentSettings;
 };
 
 function promptFor(c: DraftContext): string {
+  const policy = c.policy ?? POLICY;
+  const tone = c.settings?.tones[c.playbook] ?? PLAYBOOK_TONE[c.playbook];
   const history = c.events.slice(-8).map((e) => `day ${e.day} ${e.kind}: ${e.detail.slice(0, 200)}`).join('\n');
   return [
     `invoice: ${JSON.stringify({ id: c.inv.id, debtor: c.inv.debtorName, amountCents: c.inv.amountCents, remainingCents: remainingCents(c.inv), dueDay: c.inv.dueDay, daysOverdue: daysOverdue(c.inv, c.worldDay) })}`,
     `world day: ${c.worldDay}; debtor segment (from observed behaviour): ${c.segment}`,
-    `playbook to follow: ${c.playbook} (${PLAYBOOK_TONE[c.playbook]})`,
-    `plan limits: max ${POLICY.plan_max_instalments} instalments, last within ${POLICY.plan_max_days} days, first at least ${POLICY.plan_min_first_pct}%, totals must equal the remaining balance exactly.`,
+    `playbook to follow: ${c.playbook} (${tone})`,
+    `plan limits: max ${policy.plan_max_instalments} instalments, last within ${policy.plan_max_days} days, first at least ${policy.plan_min_first_pct}%, totals must equal the remaining balance exactly.`,
     `recent history:\n${history || '(no contact yet)'}`,
     'Draft the next step now.',
   ].join('\n');
 }
 
-function planFor(inv: Invoice, worldDay: number): Array<{ day: number; amountCents: number }> {
+function planFor(inv: Invoice, worldDay: number, policy: CollectionPolicy): Array<{ day: number; amountCents: number }> {
   const remaining = remainingCents(inv);
+  const maxDays = Math.max(1, policy.plan_max_days);
+  if (policy.plan_max_instalments <= 1) {
+    return [{ day: worldDay + Math.min(7, maxDays), amountCents: remaining }];
+  }
   const first = Math.ceil(remaining / 2);
+  const firstDay = worldDay + Math.min(7, maxDays);
+  const secondDay = Math.max(firstDay, worldDay + Math.min(21, maxDays));
   return [
-    { day: worldDay + 7, amountCents: first },
-    { day: worldDay + 21, amountCents: remaining - first },
+    { day: firstDay, amountCents: first },
+    { day: secondDay, amountCents: remaining - first },
   ];
 }
 
 export function baselineDraft(c: DraftContext): Draft {
+  const policy = c.policy ?? POLICY;
   const overdue = daysOverdue(c.inv, c.worldDay);
   const remaining = remainingCents(c.inv);
   const money = `$${(remaining / 100).toFixed(2)}`;
   const contacts = c.events.filter((e) => e.kind === 'contact').length;
+  const plan = planFor(c.inv, c.worldDay, policy);
+  const message = renderTemplate(c.settings?.templates[c.playbook] ?? DEFAULT_TEMPLATES[c.playbook], {
+    debtor: c.inv.debtorName,
+    invoice: c.inv.id,
+    amount: money,
+    remaining: money,
+    dueDay: c.inv.dueDay,
+    worldDay: c.worldDay,
+    daysOverdue: overdue,
+    overdue,
+    planCount: plan.length,
+    firstDay: plan[0]?.day ?? '',
+    lastDay: plan[plan.length - 1]?.day ?? '',
+    firstPayment: plan[0] ? `$${(plan[0].amountCents / 100).toFixed(2)}` : '',
+  });
   if (c.playbook === 'friendly-plan-early' && overdue > 0) {
     return {
       action: 'offer_plan',
-      instalments: planFor(c.inv, c.worldDay),
-      message: `Hello ${c.inv.debtorName} team, invoice ${c.inv.id} for ${money} was due on day ${c.inv.dueDay}. To make this easier, we can split it into two payments: half within 7 days and the rest within 21 days. Please reply to confirm, or let us know if anything looks wrong on the invoice.`,
+      instalments: plan,
+      message,
       why: 'Baseline playbook: offer a two-step plan early.',
     };
   }
   if (c.playbook === 'formal-firm') {
     return {
       action: 'contact',
-      message: `Dear ${c.inv.debtorName} accounts team, our records show invoice ${c.inv.id} for ${money} remains unpaid ${overdue} days after its due date. Please arrange payment this week or share a firm payment date so we can keep your account in good standing.`,
+      message,
       why: 'Baseline playbook: formal factual reminder.',
     };
   }
   return {
     action: 'contact',
-    message: `Hi ${c.inv.debtorName} team, a friendly note that invoice ${c.inv.id} for ${money} is now due. It may simply have been missed. Could you confirm the payment date on your side? Happy to resend any paperwork you need.`,
+    message,
     why: contacts === 0 ? 'Baseline playbook: gentle first reminder.' : 'Baseline playbook: gentle follow-up.',
   };
 }

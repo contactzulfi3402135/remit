@@ -11,6 +11,11 @@ followed by payment, and gradually plays the winner for that segment. A
 person handles disputes, opt-outs, distress, contact-cap cases, blocked
 drafts, and payment plans above the configured balance limit.
 
+The password-protected **Control Room** is the operator's daily surface:
+cash and overdue totals, agent pause/run controls, client and invoice
+management, the human queue, learned playbook rates, run history, and a
+bounded settings page for schedule, cadence, plans, model, and budget.
+
 ## What this repository proves — and what it does not
 
 This is a complete working system against a stand-in Go/GraphQL ledger.
@@ -64,8 +69,9 @@ and [`results/eval-baseline-seed-20261023.json`](results/eval-baseline-seed-2026
      resume an opt-out.
 3. Attribute payments to contact trials (below).
 4. For each open invoice in the action window, infer its debtor segment.
-5. Choose a playbook with an epsilon-greedy bandit (15% exploration;
-   untried playbooks first).
+5. Choose a playbook with an epsilon-greedy bandit (15% exploration by
+   default; operator-adjustable from 0–50%; untried enabled playbooks
+   first).
 6. Draft one structured step with an LLM tool call, or with the
    deterministic baseline.
 7. Pass the draft through deterministic policy. The model never writes
@@ -74,6 +80,44 @@ and [`results/eval-baseline-seed-20261023.json`](results/eval-baseline-seed-2026
    store a contact-trial row for later attribution.
 9. In the stand-in deployment, advance the simulated world one day. A
    production ERP integration would remove that clock step.
+
+## Control Room
+
+The `serve` command now runs a full operating desk rather than only a
+queue page:
+
+- **Overview** — collected/open/overdue cash, current schedule state,
+  latest run, segment counts, top human tasks, **Run one day now**, and
+  pause/resume.
+- **Clients** — search clients and invoices; add an invoice for an
+  existing or new client; edit a client's name/accounts email.
+- **Invoice case page** — balance, due state, segment, next allowed
+  contact, timeline, agent decisions, learning trials, and guarded
+  actions: send a reminder, create an equal-split plan, record a manual
+  payment or promise, pause/resume, escalate/reopen, or resolve a dispute.
+- **Human queue** — kind-appropriate decisions only. An opt-out can be
+  acknowledged and kept paused; it cannot be resumed from the UI.
+- **Learned** — contacts, paid-after counts, rates, and the current
+  winner per segment. Denominators stay visible because small samples
+  can mislead.
+- **Runs** — sweep/eval history and invoice-level decisions.
+- **Settings** — live controls stored in Postgres, with an audit history:
+  pause switch; timezone, sending days, and time window; pre-due start;
+  minimum contact gap; per-invoice cap; stale-debt cutoff; plan limits
+  and human-approval threshold; enabled playbooks; exploration and
+  reward window; playbook tones; baseline message templates; draft
+  model and per-sweep budget.
+
+GitHub still wakes the agent hourly, but an hourly invocation outside
+the selected days/window is recorded as a no-op and does **not** advance
+the simulated day. “Run one day now” may bypass the clock window only;
+it cannot bypass Pause. A Postgres advisory lock also prevents the
+dashboard and GitHub from running two live sweeps at once.
+
+Settings apply to the `live` scope. Evaluator scopes are reset to the
+reproducible defaults, so changing the live desk does not quietly move
+the benchmark. Invalid dashboard values are rejected before saving, and
+the final outbound draft still passes through the same policy gate.
 
 ## Segments and playbooks
 
@@ -97,7 +141,8 @@ Playbooks are all inside the same collection policy:
 
 Reward data is stored in `remit.contact_trials`, one row per actual
 contact. The row freezes the segment and playbook at contact time. A later
-payment can reward only the latest contact inside a seven-day window, and
+payment can reward only the latest contact inside the reward window
+(seven days by default; operator-adjustable from 1–14 days), and
 each contact can earn at most one binary reward. Partial and instalment
 payments therefore cannot make `rewards > contacts`, and a segment change
 after contact cannot move the denominator.
@@ -109,11 +154,14 @@ contact.
 
 ## Policy rails
 
-Policy lives in [`policy/collection.json`](policy/collection.json) and is
-enforced in [`src/policy.ts`](src/policy.ts), not merely described to the
-model.
+Hard policy starts in [`policy/collection.json`](policy/collection.json)
+and is enforced in [`src/policy.ts`](src/policy.ts), not merely described
+to the model. The Control Room may tune selected numeric limits, but only
+inside the hard bounds validated by `src/settings.ts`; the resulting
+effective policy is what the engine and manual dashboard actions use.
 
-Current configured limits:
+Default limits (dashboard-adjustable items show their hard range in
+Settings):
 
 - B2B invoices only; this code is not a consumer-debt product.
 - At least 3 days between contacts on one invoice.
@@ -148,8 +196,9 @@ src/
   ledger.ts    GraphQL client for the system of record
   evaluate.ts  isolated none/template/remit simulator episodes
   score.ts     cash-by-day, DSO(sim), contacts, and cost scoring
-  server.ts    password-protected human desk
-  db.ts        Postgres runs, calls, decisions, queue, trials, state
+  settings.ts  bounded, audited Control Room settings and schedule logic
+  server.ts    password-protected Control Room and human decisions
+  db.ts        Postgres runs, calls, decisions, queue, trials, settings
 
 ledger/        Go GraphQL stand-in ledger + seeded debtor simulator
 policy/        collection limits and banned phrases
@@ -171,7 +220,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Open the human desk at <http://localhost:3000>. The username is `remit`;
+Open the Control Room at <http://localhost:3000>. The username is `remit`;
 the password is `REVIEW_PASSWORD`.
 
 Run a sweep in another terminal:
@@ -231,10 +280,16 @@ live ledger.
 
 ## Model choice and budgets
 
-Drafting accepts `provider:model` specs through `--draft-model` or
-`DRAFT_MODEL`. Supported routes include xAI/Grok, Anthropic/Claude,
-OpenAI, an OpenAI-compatible OSS endpoint (`oss:...` + `OSS_BASE_URL`),
-and `baseline:rules`.
+For the live agent, the Control Room's saved `draftModel` and
+`budgetUsd` are the source of truth. `--draft-model`, `--budget`,
+`DRAFT_MODEL`, and `REMIT_BUDGETUSD` remain one-run CLI overrides; blank
+overrides do not clobber dashboard settings. Supported routes include
+xAI/Grok, Anthropic/Claude, OpenAI, an OpenAI-compatible OSS endpoint
+(`oss:...` + `OSS_BASE_URL`), and `baseline:rules`.
+
+API keys are never entered or stored in dashboard settings. A key used
+by “Run one day now” must exist in the Render review service; the same
+provider key must exist as a GitHub secret for scheduled sweeps.
 
 Examples:
 
@@ -258,8 +313,9 @@ The intended no-card route is:
 - **Render free web service `remit-ledger`** from `ledger/Dockerfile`.
 - **Render free web service `remit-review`** from
   `deploy/Dockerfile.agent`.
-- **GitHub Actions `remit-sweep`** hourly. One sweep equals one simulated
-  business day in this stand-in deployment.
+- **GitHub Actions `remit-sweep`** hourly. It reads the live Control Room
+  settings; an executed sweep equals one simulated business day, while a
+  paused/out-of-window invocation is a recorded no-op.
 - **GitHub Actions `remit-eval`** manually, fully isolated from live.
 
 [`render.yaml`](render.yaml) describes both services. After the first
@@ -290,14 +346,21 @@ npm test
 cd ledger && go vet ./... && go test ./...
 ```
 
-Current local verification on 23 Oct 2026:
+Current local verification on 25 Oct 2026:
 
 - TypeScript type-check: clean.
-- TypeScript tests: 15/15.
-- Go `vet`: clean; Go tests pass.
-- Local integration: seeded ledger, 3 baseline sweeps, contact-trial
-  rewards, over-limit human plan approval, dispute resolution, opt-out
-  resume rejection, and Postgres ledger restart persistence.
+- TypeScript tests: 22/22, including bounded settings, schedule logic,
+  custom baseline templates, disabled playbooks, and dollar parsing.
+- Go `vet`: clean; Go tests: 6/6, including dashboard invoice/client
+  creation, client edits, and manual part/full payments.
+- Local integration with Postgres + the Go ledger + the Control Room:
+  settings save/rejection, add client invoices, guarded manual reminder
+  and plan, record payment/promise, client edit, pause/resume, opt-out
+  lock, Run Now, scheduled no-op when paused/out of window, and CLI
+  `--force` overriding only the clock window.
+- Earlier integration also covered contact-trial rewards, over-limit
+  human plan approval checks, dispute resolution, and Postgres ledger
+  restart persistence.
 
 ## Failure modes and kill criteria
 

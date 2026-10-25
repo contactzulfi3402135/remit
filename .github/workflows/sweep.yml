@@ -10,13 +10,17 @@ on:
   workflow_dispatch:
     inputs:
       draft_model:
-        description: 'Draft model as provider:model (blank = DRAFT_MODEL secret/variable or auto)'
+        description: 'Optional one-run model override as provider:model (blank = Control Room setting)'
         type: string
         default: ''
       budget_usd:
-        description: 'Maximum model spend for this sweep in USD'
+        description: 'Optional one-run budget override in USD (blank = Control Room setting)'
         type: string
-        default: '1'
+        default: ''
+      force_schedule:
+        description: 'Run despite the dashboard time window (never overrides Pause)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -69,10 +73,9 @@ jobs:
         run: npm run seed
       - name: Sweep one simulated business day
         run: |
+          args=(sweep)
+          if [ -n "$DRAFT_MODEL" ]; then args+=(--draft-model "$DRAFT_MODEL"); fi
           budget='${{ inputs.budget_usd }}'
-          if [ -z "$budget" ]; then budget=1; fi
-          if [ -n "$DRAFT_MODEL" ]; then
-            npx tsx src/cli.ts sweep --draft-model "$DRAFT_MODEL" --budget "$budget"
-          else
-            npx tsx src/cli.ts sweep --budget "$budget"
-          fi
+          if [ -n "$budget" ]; then args+=(--budget "$budget"); fi
+          if [ '${{ inputs.force_schedule }}' = 'true' ]; then args+=(--force); fi
+          npx tsx src/cli.ts "${args[@]}"
