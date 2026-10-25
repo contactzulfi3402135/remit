@@ -1,0 +1,147 @@
+{
+  "at": "2026-10-25T03:16:14.781Z",
+  "draftModel": "baseline:rules",
+  "seed": 20261023,
+  "seconds": 11.2,
+  "scores": {
+    "none": {
+      "invoicedCents": 44606850,
+      "collectedBy30": 20096931,
+      "collectedBy60": 24376435,
+      "pctBy30": 0.4505346376173166,
+      "pctBy60": 0.5464729071880216,
+      "dsoSim": 52.0555003996023,
+      "paidCount": 33,
+      "totalCount": 67,
+      "contacts": 0,
+      "costUsd": 0,
+      "costPer1000Collected": 0
+    },
+    "template": {
+      "invoicedCents": 44606850,
+      "collectedBy30": 34217432,
+      "collectedBy60": 37607031,
+      "pctBy30": 0.7670891802492218,
+      "pctBy60": 0.8430774869778969,
+      "dsoSim": 42.60236923252819,
+      "paidCount": 53,
+      "totalCount": 67,
+      "contacts": 128,
+      "costUsd": 0,
+      "costPer1000Collected": 0
+    },
+    "remit": {
+      "invoicedCents": 44606850,
+      "collectedBy30": 35615043,
+      "collectedBy60": 38639181,
+      "pctBy30": 0.7984209375914237,
+      "pctBy60": 0.8662163098268539,
+      "dsoSim": 40.642393287129664,
+      "paidCount": 54,
+      "totalCount": 67,
+      "contacts": 157,
+      "costUsd": 0,
+      "costPer1000Collected": 0
+    }
+  },
+  "extraCollectedVsTemplateCents": 1032150,
+  "playbookStats": [
+    {
+      "segment": "new",
+      "playbook": "formal-firm",
+      "contacts": 27,
+      "rewards": 11
+    },
+    {
+      "segment": "new",
+      "playbook": "friendly-plan-early",
+      "contacts": 16,
+      "rewards": 4
+    },
+    {
+      "segment": "new",
+      "playbook": "friendly-remind-only",
+      "contacts": 15,
+      "rewards": 5
+    },
+    {
+      "segment": "promise-broken",
+      "playbook": "formal-firm",
+      "contacts": 20,
+      "rewards": 10
+    },
+    {
+      "segment": "promise-broken",
+      "playbook": "friendly-plan-early",
+      "contacts": 3,
+      "rewards": 1
+    },
+    {
+      "segment": "promise-broken",
+      "playbook": "friendly-remind-only",
+      "contacts": 1,
+      "rewards": 0
+    },
+    {
+      "segment": "promised-before",
+      "playbook": "friendly-plan-early",
+      "contacts": 1,
+      "rewards": 0
+    },
+    {
+      "segment": "silent",
+      "playbook": "formal-firm",
+      "contacts": 1,
+      "rewards": 0
+    },
+    {
+      "segment": "silent",
+      "playbook": "friendly-plan-early",
+      "contacts": 1,
+      "rewards": 0
+    },
+    {
+      "segment": "silent",
+      "playbook": "friendly-remind-only",
+      "contacts": 12,
+      "rewards": 1
+    },
+    {
+      "segment": "slow-payer",
+      "playbook": "formal-firm",
+      "contacts": 2,
+      "rewards": 0
+    },
+    {
+      "segment": "slow-payer",
+      "playbook": "friendly-plan-early",
+      "contacts": 6,
+      "rewards": 1
+    },
+    {
+      "segment": "slow-payer",
+      "playbook": "friendly-remind-only",
+      "contacts": 16,
+      "rewards": 9
+    },
+    {
+      "segment": "usually-pays",
+      "playbook": "formal-firm",
+      "contacts": 27,
+      "rewards": 11
+    },
+    {
+      "segment": "usually-pays",
+      "playbook": "friendly-plan-early",
+      "contacts": 6,
+      "rewards": 1
+    },
+    {
+      "segment": "usually-pays",
+      "playbook": "friendly-remind-only",
+      "contacts": 3,
+      "rewards": 0
+    }
+  ],
+  "note": "Seeded simulator debtors with disclosed behaviour rules; the agent never sees persona labels. Proves strategy/policy wiring and relative uplift, not real-world collection rates."
+}
