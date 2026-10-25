@@ -8,7 +8,7 @@ repository).
 ```text
                          ┌──────────────────────────────┐
                          │ Control Room (HTTP + Basic)  │
-                         │ clients / queue / settings   │
+                         │ home / clients / queue / guide │
                          └──────────────┬───────────────┘
                                         │
 ┌────────────────┐      ┌───────────────▼────────────────┐      ┌─────────────────┐
@@ -77,10 +77,17 @@ the engine, queue approval, and manual sends. It always forces
 
 The dashboard can tune schedule, cadence, plan bounds, enabled
 playbooks, exploration/reward window, tones/templates, model, and
-budget only inside validated ranges. Templates containing banned or
+budget only inside validated ranges. Presets, model-pick buttons,
+synced sliders, the sticky save bar, and the live plain-English preview
+are presentation aids over the same form fields; they add no new
+server authority. The preview escapes operator-entered values before
+putting them into the page. Templates containing banned or
 discount-like language are rejected at save time and again by the final
-draft gate. Corrupt stored settings fall back to defaults rather than
-taking the sweep down.
+draft gate. If a database still contains an exact copy of the first
+shipped default templates, normalization migrates those strings to the
+due-day-accurate defaults; operator-edited wording is left untouched.
+Corrupt stored settings fall back to defaults rather than taking the
+sweep down.
 
 `scheduleStatus` evaluates timezone/weekday/time in the sweep wrapper, not
 inside `runDay`, so evaluation remains clock-independent. A paused or
@@ -177,7 +184,11 @@ fields, record manual payments/promises, pause/resume ordinary contact,
 escalate/reopen cases, resolve disputes, and send a manual reminder or
 equal-split plan. Manual outbound actions still require an open,
 unsuppressed invoice and pass the same effective policy gate; manual
-contacts create normal immutable trials.
+contacts create normal immutable trials. A paid or zero-balance case
+is presented as closed and its reminder/payment/promise/plan controls
+are disabled in the UI; the server handlers retain their own checks.
+Queue and decision reasons are displayed in operator dollars and plain
+language, with the exact system reason available on queue cards.
 
 The queue exposes only kind-appropriate actions:
 
@@ -209,7 +220,9 @@ agent suppression. Generic resume reopens an escalated ledger invoice (via
 or discount action anywhere in the UI or agent toolset.
 
 In production mode, the desk fails closed if `REVIEW_PASSWORD` is unset.
-Debtor-controlled strings are HTML-escaped before rendering.
+Debtor-controlled strings are HTML-escaped before rendering, and the
+Controls live preview escapes operator-entered form values before
+using `innerHTML` for its formatted summary.
 
 ## Data model
 

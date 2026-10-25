@@ -36,6 +36,16 @@ export type AgentSettings = {
 };
 
 export const DEFAULT_TEMPLATES: Record<Playbook, string> = {
+  'friendly-plan-early': 'Hello {debtor} team, invoice {invoice} for {amount} is due on world day {dueDay}. To make payment easier, we can split it into {planCount} payments, with the first due by day {firstDay} and the final payment by day {lastDay}. Please reply to confirm, or let us know if anything looks wrong on the invoice.',
+  'formal-firm': 'Dear {debtor} accounts team, our records show invoice {invoice} for {amount}, due on world day {dueDay}, remains unpaid on world day {worldDay}. Please arrange payment or share a firm payment date so we can keep your account in good standing.',
+  'friendly-remind-only': 'Hi {debtor} team, a friendly note about invoice {invoice} for {amount}, due on world day {dueDay}. It may already be in your payment run. Could you confirm the payment date on your side? Happy to resend any paperwork you need.',
+};
+
+// Exact copies of the first shipped defaults. They could describe a
+// pre-due invoice as already due (or render a negative overdue count),
+// so a saved-but-unchanged default is migrated on load. Operator-edited
+// wording is never rewritten.
+const LEGACY_DEFAULT_TEMPLATES: Record<Playbook, string> = {
   'friendly-plan-early': 'Hello {debtor} team, invoice {invoice} for {amount} was due on day {dueDay}. To make this easier, we can split it into {planCount} payments, with the first due by day {firstDay} and the final payment by day {lastDay}. Please reply to confirm, or let us know if anything looks wrong on the invoice.',
   'formal-firm': 'Dear {debtor} accounts team, our records show invoice {invoice} for {amount} remains unpaid {daysOverdue} days after its due date. Please arrange payment this week or share a firm payment date so we can keep your account in good standing.',
   'friendly-remind-only': 'Hi {debtor} team, a friendly note that invoice {invoice} for {amount} is now due. It may simply have been missed. Could you confirm the payment date on your side? Happy to resend any paperwork you need.',
@@ -127,7 +137,10 @@ export function normalizeSettings(raw: unknown): AgentSettings {
   const rawTones = asRecord(r.tones);
   const rawTemplates = asRecord(r.templates);
   const tones = Object.fromEntries(PLAYBOOKS.map((p) => [p, text(rawTones[p], d.tones[p], 300)])) as Record<Playbook, string>;
-  const templates = Object.fromEntries(PLAYBOOKS.map((p) => [p, text(rawTemplates[p], d.templates[p], 1200)])) as Record<Playbook, string>;
+  const templates = Object.fromEntries(PLAYBOOKS.map((p) => {
+    const saved = text(rawTemplates[p], d.templates[p], 1200);
+    return [p, saved === LEGACY_DEFAULT_TEMPLATES[p] ? d.templates[p] : saved];
+  })) as Record<Playbook, string>;
   for (const p of PLAYBOOKS) {
     const banned = bannedPhraseIn(templates[p], POLICY);
     if (banned) throw new Error(`${p} template contains banned phrase: ${banned}`);

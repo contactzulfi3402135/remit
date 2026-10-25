@@ -76,6 +76,33 @@ test('templates render invoice values and baseline drafting uses saved wording',
   assert.equal(draft.message, 'CUSTOM Acme inv-9 $20.00');
 });
 
+test('default baseline wording stays accurate before the due day', () => {
+  const settings = defaultSettings();
+  const inv: Invoice = {
+    id: 'inv-early', debtorId: 'd1', debtorName: 'Blue Peak', amountCents: 12345, paidCents: 0,
+    issuedDay: 0, dueDay: 4, status: 'open', paidDay: null,
+  };
+  for (const playbook of ['friendly-plan-early', 'formal-firm', 'friendly-remind-only'] as const) {
+    const draft = baselineDraft({ inv, events: [], worldDay: 2, segment: 'new', playbook, policy: policyFromSettings(settings), settings });
+    assert.match(draft.message, /day 4/);
+    assert.doesNotMatch(draft.message, /-2|now due|days after its due date/);
+  }
+
+  const migrated = normalizeSettings({
+    ...settings,
+    templates: {
+      ...settings.templates,
+      'friendly-remind-only': 'Hi {debtor} team, a friendly note that invoice {invoice} for {amount} is now due. It may simply have been missed. Could you confirm the payment date on your side? Happy to resend any paperwork you need.',
+    },
+  });
+  assert.equal(migrated.templates['friendly-remind-only'], settings.templates['friendly-remind-only']);
+  const custom = normalizeSettings({
+    ...settings,
+    templates: { ...settings.templates, 'friendly-remind-only': 'Custom wording for {invoice}.' },
+  });
+  assert.equal(custom.templates['friendly-remind-only'], 'Custom wording for {invoice}.');
+});
+
 test('playbook selection stays inside the operator-enabled set', () => {
   const stats = [
     { playbook: 'friendly-plan-early' as const, contacts: 10, rewards: 0 },

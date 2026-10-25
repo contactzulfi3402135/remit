@@ -12,9 +12,11 @@ person handles disputes, opt-outs, distress, contact-cap cases, blocked
 drafts, and payment plans above the configured balance limit.
 
 The password-protected **Control Room** is the operator's daily surface:
-cash and overdue totals, agent pause/run controls, client and invoice
-management, the human queue, learned playbook rates, run history, and a
-bounded settings page for schedule, cadence, plans, model, and budget.
+a plain-English mission control for cash and overdue totals, agent
+pause/run controls, client and invoice management, human decisions,
+learned playbook rates, run history, and bounded live controls for
+schedule, cadence, plans, model, and budget. A built-in Guide explains
+the daily routine and every operator term without requiring the code.
 
 ## What this repository proves — and what it does not
 
@@ -86,27 +88,39 @@ and [`results/eval-baseline-seed-20261023.json`](results/eval-baseline-seed-2026
 The `serve` command now runs a full operating desk rather than only a
 queue page:
 
-- **Overview** — collected/open/overdue cash, current schedule state,
-  latest run, segment counts, top human tasks, **Run one day now**, and
-  pause/resume.
-- **Clients** — search clients and invoices; add an invoice for an
-  existing or new client; edit a client's name/accounts email.
-- **Invoice case page** — balance, due state, segment, next allowed
-  contact, timeline, agent decisions, learning trials, and guarded
-  actions: send a reminder, create an equal-split plan, record a manual
-  payment or promise, pause/resume, escalate/reopen, or resolve a dispute.
-- **Human queue** — kind-appropriate decisions only. An opt-out can be
-  acknowledged and kept paused; it cannot be resumed from the UI.
-- **Learned** — contacts, paid-after counts, rates, and the current
-  winner per segment. Denominators stay visible because small samples
-  can mislead.
-- **Runs** — sweep/eval history and invoice-level decisions.
-- **Settings** — live controls stored in Postgres, with an audit history:
+- **Home** — “money mission control”: collected/open/overdue cash, a
+  money pipeline, schedule state, your next three operator moves,
+  latest work, segment counts, **Run one day now**, and pause/resume.
+- **Clients & invoices** — live search, Ready/Overdue/Needs you/
+  Waiting/Paid tabs, client cards, and a three-step add-invoice form.
+  Every invoice row answers “What happens next?” in plain English.
+- **Invoice case page** — balance progress, due state, debtor type,
+  a “What should happen next?” recommendation, timeline, agent
+  decisions, learning trials, and guarded actions: send a reminder,
+  create an equal-split plan, record a manual payment or promise,
+  pause/resume, escalate/reopen, or resolve a dispute. Paid cases lock
+  reminder/payment/promise/plan tools instead of offering $0 actions.
+- **Needs you** — decision cards show the plain-English reason, the
+  debtor evidence or blocked draft/plan, and exactly what each button
+  does. Only kind-appropriate actions are offered; an opt-out can be
+  acknowledged and kept paused, never resumed from the UI.
+- **What works** — contacts, paid-soon-after counts, rates, evidence
+  bars, and the current leader per debtor type. Denominators stay
+  visible because small samples can mislead; a style with zero wins is
+  shown as “No winner yet”, not as a winner.
+- **Activity** — completed and honestly recorded no-op runs, plus
+  invoice-level decisions with reasons translated out of internal cents
+  notation.
+- **Controls** — live settings stored in Postgres, with an audit
+  history: Gentle/Balanced/Firm presets, a live plain-English preview,
   pause switch; timezone, sending days, and time window; pre-due start;
   minimum contact gap; per-invoice cap; stale-debt cutoff; plan limits
   and human-approval threshold; enabled playbooks; exploration and
-  reward window; playbook tones; baseline message templates; draft
-  model and per-sweep budget.
+  reward window sliders; playbook tones and message examples; model
+  picks; per-sweep budget; and a sticky Save/Reset bar.
+- **Guide** — a built-in two-minute operating guide: the five-minute
+  daily routine, what each menu item means, a glossary, schedule
+  examples, and “Why didn't Remit send?” checks.
 
 GitHub still wakes the agent hourly, but an hourly invocation outside
 the selected days/window is recorded as a no-op and does **not** advance
@@ -161,7 +175,7 @@ inside the hard bounds validated by `src/settings.ts`; the resulting
 effective policy is what the engine and manual dashboard actions use.
 
 Default limits (dashboard-adjustable items show their hard range in
-Settings):
+Controls):
 
 - B2B invoices only; this code is not a consumer-debt product.
 - At least 3 days between contacts on one invoice.
@@ -348,19 +362,33 @@ cd ledger && go vet ./... && go test ./...
 
 Current local verification on 25 Oct 2026:
 
-- TypeScript type-check: clean.
-- TypeScript tests: 22/22, including bounded settings, schedule logic,
-  custom baseline templates, disabled playbooks, and dollar parsing.
-- Go `vet`: clean; Go tests: 6/6, including dashboard invoice/client
-  creation, client edits, and manual part/full payments.
-- Local integration with Postgres + the Go ledger + the Control Room:
-  settings save/rejection, add client invoices, guarded manual reminder
-  and plan, record payment/promise, client edit, pause/resume, opt-out
-  lock, Run Now, scheduled no-op when paused/out of window, and CLI
-  `--force` overriding only the clock window.
-- Earlier integration also covered contact-trial rewards, over-limit
-  human plan approval checks, dispute resolution, and Postgres ledger
-  restart persistence.
+- TypeScript type-check and production build: clean; the compiled CLI
+  starts from `dist`.
+- TypeScript tests: 26/26, including bounded settings, schedule logic,
+  custom baseline templates, accurate default wording before the due
+  day, disabled playbooks, dollar parsing, and plain-English operator
+  labels/next-step/money-reason translation.
+- Go `vet` and `gofmt`: clean; Go tests: 6/6, including dashboard
+  invoice/client creation, client edits, and manual part/full payments.
+- Browser and local integration on an isolated Postgres database with
+  the Go ledger and redesigned Control Room: 110 internal GET links
+  returned 200; Clients/Needs-you live search and all invoice tabs
+  worked; Controls presets, model picks, synced sliders, unsaved state,
+  escaped live preview, save, and reset worked; an unsafe two-day gap
+  was rejected without changing stored settings or history.
+- The same isolated run verified add-client/invoice, part payment,
+  guarded reminder and equal-split plan, promise waiting, client edit,
+  pause/resume, escalation and queue resume, stored-plan revalidation,
+  dispute resolution, threat wording blocked with no trial, schedule
+  no-op outside the selected window, CLI `--force` overriding only the
+  clock, Pause blocking dashboard and forced CLI work, dashboard Run
+  Now, production Basic-auth 401/200 behaviour, and
+  `rewards <= contacts` for every segment/playbook.
+- Re-ran the seed `20261023` baseline evaluator after the redesign and
+  the due-date wording correction on an in-memory ledger and separate
+  eval database; scores and the full playbook-stat table matched the
+  canonical report exactly. Earlier integration also covered opt-out
+  locking and Postgres ledger restart persistence.
 
 ## Failure modes and kill criteria
 
